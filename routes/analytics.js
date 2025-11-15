@@ -3,60 +3,57 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../db/db');
 const { RateLimiterMemory } = require('rate-limiter-flexible');
+const { authenticateApiKey } = require('../middleware/auth');
 
-// Rate limiter: 100 requests per minute per IP
-const rateLimiter = new RateLimiterMemory({
-  points: 100,
-  duration: 60,
-});
-
+const rateLimiter = new RateLimiterMemory({ points: 100, duration: 60 });
 const rateLimit = (req, res, next) => {
   rateLimiter.consume(req.ip)
     .then(() => next())
     .catch(() => res.status(429).json({ error: 'Too many requests' }));
 };
 
-// Authenticate API key
-const authenticateApiKey = async (req, res, next) => {
-  const apiKey = req.header('x-api-key');
-  if (!apiKey) {
-    return res.status(401).json({ error: 'x-api-key header required' });
-  }
-
-  try {
-    const result = await pool.query(
-      'SELECT id, revoked FROM users WHERE api_key = $1',
-      [apiKey]
-    );
-
-    if (result.rows.length === 0 || result.rows[0].revoked) {
-      return res.status(401).json({ error: 'Invalid or revoked API key' });
-    }
-
-    req.user = result.rows[0];
-    next();
-  } catch (err) {
-    console.error('Auth error:', err);
-    res.status(500).json({ error: 'Authentication failed' });
-  }
-};
-
-// POST /api/analytics/collect
+/**
+ * @swagger
+ * /api/analytics/collect:
+ *   post:
+ *     summary: Collect analytics event
+ *     security:
+ *       - ApiKeyAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               event:
+ *                 type: string
+ *               url:
+ *                 type: string
+ *               referrer:
+ *                 type: string
+ *               device:
+ *                 type: string
+ *               ipAddress:
+ *                 type: string
+ *               timestamp:
+ *                 type: string
+ *               metadata:
+ *                 type: object
+ *               userId:
+ *                 type: string
+ *     responses:
+ *       201:
+ *         description: Event collected
+ */
 router.post('/collect', rateLimit, authenticateApiKey, async (req, res) => {
   const {
-    event,
-    url,
-    referrer,
-    device,
-    ipAddress,
+    event, url, referrer, device, ipAddress,
     timestamp = new Date().toISOString(),
-    metadata = {},
-    userId
+    metadata = {}, userId
   } = req.body;
 
-  if (!event) {
-    return res.status(400).json({ error: 'event is required' });
-  }
+  if (!event) return res.status(400).json({ error: 'event is required' });
 
   try {
     await pool.query(
@@ -64,18 +61,11 @@ router.post('/collect', rateLimit, authenticateApiKey, async (req, res) => {
        (app_id, event_type, url, referrer, device, ip_address, timestamp, metadata, user_id)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
       [
-        req.user.id,
-        event,
-        url || null,
-        referrer || null,
-        device || null,
-        ipAddress || null,
-        timestamp,
-        JSON.stringify(metadata),
-        userId || null
+        req.user.id, event, url || null, referrer || null,
+        device || null, ipAddress || null, timestamp,
+        JSON.stringify(metadata), userId || null
       ]
     );
-
     res.status(201).json({ message: 'Event collected' });
   } catch (err) {
     console.error('Collect error:', err);
@@ -83,21 +73,40 @@ router.post('/collect', rateLimit, authenticateApiKey, async (req, res) => {
   }
 });
 
-// GET /api/analytics/event-summary
+/**
+ * @swagger
+ * /api/analytics/event-summary:
+ *   get:
+ *     summary: Get event summary
+ *     security:
+ *       - ApiKeyAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: event
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: startDate
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: endDate
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: app_id
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Event summary
+ */
 router.get('/event-summary', authenticateApiKey, async (req, res) => {
   const { event, startDate, endDate, app_id } = req.query;
+  if (!event) return res.status(400).json({ error: 'event query param required' });
 
-  if (!event) {
-    return res.status(400).json({ error: 'event query param required' });
-  }
-
-  let query = `
-    SELECT 
-      COUNT(*) as count,
-      COUNT(DISTINCT user_id) as "uniqueUsers"
-    FROM events 
-    WHERE event_type = $1 AND app_id = $2
-  `;
+  let query = `SELECT COUNT(*) as count, COUNT(DISTINCT user_id) as "uniqueUsers" FROM events WHERE event_type = $1 AND app_id = $2`;
   let params = [event, parseInt(req.user.id)];
 
   if (app_id) {
@@ -115,13 +124,7 @@ router.get('/event-summary', authenticateApiKey, async (req, res) => {
 
   try {
     const result = await pool.query(query, params);
-
-    const deviceQuery = `
-      SELECT device, COUNT(*) as count 
-      FROM events 
-      WHERE event_type = $1 AND app_id = $2
-      GROUP BY device
-    `;
+    const deviceQuery = `SELECT device, COUNT(*) as count FROM events WHERE event_type = $1 AND app_id = $2 GROUP BY device`;
     const deviceParams = app_id ? [event, parseInt(app_id)] : [event, parseInt(req.user.id)];
     const deviceResult = await pool.query(deviceQuery, deviceParams);
 
@@ -142,24 +145,32 @@ router.get('/event-summary', authenticateApiKey, async (req, res) => {
   }
 });
 
-// GET /api/analytics/user-stats
+/**
+ * @swagger
+ * /api/analytics/user-stats:
+ *   get:
+ *     summary: Get user stats
+ *     security:
+ *       - ApiKeyAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: userId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: User stats
+ */
 router.get('/user-stats', authenticateApiKey, async (req, res) => {
   const { userId } = req.query;
-  if (!userId) {
-    return res.status(400).json({ error: 'userId query param required' });
-  }
+  if (!userId) return res.status(400).json({ error: 'userId query param required' });
 
   try {
     const result = await pool.query(
-      `SELECT 
-         COUNT(*) as total_events,
-         ip_address,
-         metadata->>'browser' as browser,
-         metadata->>'os' as os
-       FROM events 
-       WHERE user_id = $1 AND app_id = $2
-       GROUP BY ip_address, metadata->>'browser', metadata->>'os'
-       LIMIT 1`,
+      `SELECT COUNT(*) as total_events, ip_address, metadata->>'browser' as browser, metadata->>'os' as os
+       FROM events WHERE user_id = $1 AND app_id = $2
+       GROUP BY ip_address, metadata->>'browser', metadata->>'os' LIMIT 1`,
       [userId, parseInt(req.user.id)]
     );
 
@@ -168,14 +179,10 @@ router.get('/user-stats', authenticateApiKey, async (req, res) => {
     }
 
     const row = result.rows[0];
-
     res.json({
       userId,
       totalEvents: parseInt(row.total_events),
-      deviceDetails: {
-        browser: row.browser || null,
-        os: row.os || null
-      },
+      deviceDetails: { browser: row.browser || null, os: row.os || null },
       ipAddress: row.ip_address || null
     });
   } catch (err) {
