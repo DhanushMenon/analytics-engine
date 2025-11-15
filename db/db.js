@@ -1,23 +1,15 @@
 // db/db.js
 const { Pool } = require('pg');
-const parse = require('pg-connection-string').parse;
 
-let config = {};
-
-if (process.env.DATABASE_URL) {
-  config = parse(process.env.DATABASE_URL);
-}
-
-// FORCE IPv4 HOST — THIS IS THE ONLY WAY THAT WORKS
-config.host = 'db.fsghlmvxfvlxtmasgimg.supabase.co';
-config.ssl = {
-  rejectUnauthorized: false
-};
-
-const pool = new Pool(config);
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: {
+    rejectUnauthorized: false
+  }
+});
 
 pool.on('connect', () => {
-  console.log('DB connected to Supabase via IPv4 (FINAL FIX)');
+  console.log('DB connected via Supavisor Session Mode (IPv4 compatible)');
 });
 
 pool.on('error', (err) => {
