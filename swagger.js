@@ -8,9 +8,11 @@ const options = {
     info: {
       title: 'Analytics Engine API',
       version: '1.0.0',
-      description: 'Scalable backend for website & mobile analytics'
+      description: 'Scalable backend for website & mobile analytics',
     },
-    servers: [{ url: 'https://analytics-engine-8isx.onrender.com' }],
+    servers: [
+      { url: 'https://analytics-engine-8isx.onrender.com' }
+    ],
     components: {
       securitySchemes: {
         ApiKeyAuth: {
@@ -19,11 +21,12 @@ const options = {
           name: 'x-api-key'
         }
       }
-    },
-    security: [{ ApiKeyAuth: [] }]
+    }
   },
+  // FIXED: Relative path from root to scan JSDoc
   apis: ['./routes/*.js']
 };
 
 const specs = swaggerJSDoc(options);
+
 module.exports = { swaggerUi, specs };
